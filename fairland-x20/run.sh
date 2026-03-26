@@ -12,7 +12,7 @@ fi
 echo "============================================"
 echo "  Fairland X20 Pool Heat Pump Addon"
 echo "============================================"
-cat "$OPTIONS_FILE"
+cat "$OPTIONS_FILE" | python3 -c "import sys,json; d=json.load(sys.stdin); d['mqtt_password']='***'; print(json.dumps(d,indent=2))"
 echo ""
 echo "============================================"
 

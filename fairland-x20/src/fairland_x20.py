@@ -104,7 +104,7 @@ class FairlandX20Client:
                 await self.connect()
 
             # Read Coils - FC1: address 0 (running status)
-            result = await self._client.read_coils(address=0, count=1, slave=self.slave)
+            result = await self._client.read_coils(address=0, count=1, unit=self.slave)
             if not result.isError():
                 self.state.running = result.bits[0]
             else:
@@ -112,7 +112,7 @@ class FairlandX20Client:
             await self._delay()
 
             # Read Discrete Inputs - FC2: address 16 (error status)
-            result = await self._client.read_discrete_inputs(address=16, count=1, slave=self.slave)
+            result = await self._client.read_discrete_inputs(address=16, count=1, unit=self.slave)
             if not result.isError():
                 self.state.error = result.bits[0]
             else:
@@ -120,7 +120,7 @@ class FairlandX20Client:
             await self._delay()
 
             # Read Discrete Inputs - FC2: address 51 (E3 error)
-            result = await self._client.read_discrete_inputs(address=51, count=1, slave=self.slave)
+            result = await self._client.read_discrete_inputs(address=51, count=1, unit=self.slave)
             if not result.isError():
                 self.state.error_e3 = result.bits[0]
             else:
@@ -128,7 +128,7 @@ class FairlandX20Client:
             await self._delay()
 
             # Read Holding Registers - FC3: address 0-3 (HVAC mode, fan mode, _, target temp)
-            result = await self._client.read_holding_registers(address=0, count=4, slave=self.slave)
+            result = await self._client.read_holding_registers(address=0, count=4, unit=self.slave)
             if not result.isError():
                 self.state.hvac_mode = HvacMode(result.registers[0])
                 self.state.fan_mode = FanMode(result.registers[1])
@@ -138,7 +138,7 @@ class FairlandX20Client:
             await self._delay()
 
             # Read Input Registers - FC4: address 0-5
-            result = await self._client.read_input_registers(address=0, count=6, slave=self.slave)
+            result = await self._client.read_input_registers(address=0, count=6, unit=self.slave)
             if not result.isError():
                 self.state.compressor_percent = result.registers[0]
                 self.state.pfc_voltage = result.registers[2]
@@ -150,7 +150,7 @@ class FairlandX20Client:
             await self._delay()
 
             # Read Input Registers - FC4: address 11 (compressor current)
-            result = await self._client.read_input_registers(address=11, count=1, slave=self.slave)
+            result = await self._client.read_input_registers(address=11, count=1, unit=self.slave)
             if not result.isError():
                 self.state.compressor_current = round(result.registers[0] * 0.1, 2)
             else:
@@ -171,7 +171,7 @@ class FairlandX20Client:
         """Turn heat pump on/off via FC5 (Write Single Coil)."""
         try:
             result = await self._client.write_coil(
-                address=0, value=on, slave=self.slave
+                address=0, value=on, unit=self.slave
             )
             if not result.isError():
                 log.info("Set power to %s", "ON" if on else "OFF")
@@ -186,7 +186,7 @@ class FairlandX20Client:
         """Set HVAC mode (Auto/Heat/Cool) via FC6 (Write Single Register)."""
         try:
             result = await self._client.write_register(
-                address=0, value=int(mode), slave=self.slave
+                address=0, value=int(mode), unit=self.slave
             )
             if not result.isError():
                 log.info("Set HVAC mode to %s", mode.name)
@@ -201,7 +201,7 @@ class FairlandX20Client:
         """Set fan mode (Low/Medium/High) via FC6 (Write Single Register)."""
         try:
             result = await self._client.write_register(
-                address=1, value=int(mode), slave=self.slave
+                address=1, value=int(mode), unit=self.slave
             )
             if not result.isError():
                 log.info("Set fan mode to %s", mode.name)
@@ -218,7 +218,7 @@ class FairlandX20Client:
         raw = encode_temp(temp)
         try:
             result = await self._client.write_register(
-                address=3, value=raw, slave=self.slave
+                address=3, value=raw, unit=self.slave
             )
             if not result.isError():
                 log.info("Set target temp to %.1f°C (raw=%d)", temp, raw)

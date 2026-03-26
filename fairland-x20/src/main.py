@@ -202,20 +202,17 @@ def main():
 
     addon = FairlandX20Addon(config)
 
-    loop = asyncio.new_event_loop()
-
     def shutdown(sig, frame):
         log.info("Signal %s received, shutting down...", sig)
-        loop.run_until_complete(addon.stop())
-        sys.exit(0)
+        addon._running = False
 
     signal.signal(signal.SIGTERM, shutdown)
     signal.signal(signal.SIGINT, shutdown)
 
     try:
-        loop.run_until_complete(addon.start())
+        asyncio.run(addon.start())
     except KeyboardInterrupt:
-        loop.run_until_complete(addon.stop())
+        pass
 
 
 if __name__ == "__main__":
