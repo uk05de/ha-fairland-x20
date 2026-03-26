@@ -10,6 +10,8 @@ arch:
 url: "https://github.com/uk05de/ha-fairland-x20"
 startup: services
 init: false
+services:
+  - mqtt:need
 options:
   modbus_host: "192.168.2.100"
   modbus_port: 502
