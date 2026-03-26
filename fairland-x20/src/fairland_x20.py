@@ -88,8 +88,10 @@ class FairlandX20Client:
                 self._slave_kwargs = {"slave": slave}
             elif "unit" in params:
                 self._slave_kwargs = {"unit": slave}
+            elif "device_id" in params:
+                self._slave_kwargs = {"device_id": slave}
             else:
-                log.warning("Neither 'slave' nor 'unit' found in read_coils signature, trying without")
+                log.warning("No known slave parameter found in read_coils signature, trying without")
         except Exception as e:
             log.warning("Could not inspect pymodbus API: %s", e)
 
