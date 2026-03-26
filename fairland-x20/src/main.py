@@ -48,8 +48,11 @@ class FairlandX20Addon:
         log.info("MQTT: %s:%d", self.mqtt.host, self.mqtt.port)
         log.info("Scan interval: %ds", self.scan_interval)
 
-        # Connect MQTT
+        # Connect MQTT and publish discovery immediately
         self.mqtt.connect()
+        # Wait briefly for MQTT connection to establish
+        await asyncio.sleep(2)
+        self.mqtt.publish_offline()
 
         # Register command callbacks
         self.mqtt.set_command_callback("power", self._queue_cmd("power"))
