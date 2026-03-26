@@ -6,6 +6,7 @@
 import asyncio
 import logging
 import signal
+import socket
 import sys
 
 from fairland_x20 import FairlandX20Client
@@ -37,6 +38,8 @@ class FairlandX20Addon:
 
         self._running = True
         self._command_queue = asyncio.Queue()
+        self._reachable = False
+        self._reachability_interval = 60  # check every 60s when offline
 
     async def start(self):
         log.info("Starting Fairland X20 Addon")
@@ -57,25 +60,47 @@ class FairlandX20Addon:
         # Main loop
         consecutive_errors = 0
         max_errors = 10
-        was_polling = False
+        was_active = False
 
         while self._running:
+            # Manual override: polling disabled via switch
             if not self.mqtt.polling_enabled:
-                # Polling disabled (Wintermodus)
-                if was_polling:
+                if was_active:
                     log.info("Polling disabled - disconnecting Modbus, marking offline")
                     await self.modbus.disconnect()
                     self.mqtt.publish_offline()
-                    was_polling = False
+                    self._reachable = False
+                    was_active = False
                 await asyncio.sleep(self.scan_interval)
                 continue
 
-            # Polling enabled - connect if needed
-            if not was_polling:
-                log.info("Polling enabled - connecting to Modbus")
+            # Auto-detect: check if WP is reachable
+            reachable = await self._check_reachable()
+
+            if not reachable:
+                if was_active:
+                    log.info("Heat pump not reachable - disconnecting, marking offline")
+                    await self.modbus.disconnect()
+                    self.mqtt.publish_offline()
+                    was_active = False
+                    consecutive_errors = 0
+                elif not self._reachable:
+                    log.debug("Heat pump still not reachable, waiting...")
+                self._reachable = False
+                await asyncio.sleep(self._reachability_interval)
+                continue
+
+            if not self._reachable:
+                log.info("Heat pump is reachable again at %s:%d",
+                         self.modbus.host, self.modbus.port)
+            self._reachable = True
+
+            # Connect if needed
+            if not was_active:
+                log.info("Connecting to Modbus")
                 await self.modbus.connect()
                 consecutive_errors = 0
-                was_polling = True
+                was_active = True
 
             try:
                 # Process pending commands
@@ -104,6 +129,19 @@ class FairlandX20Addon:
                     sys.exit(1)
 
             await asyncio.sleep(self.scan_interval)
+
+    async def _check_reachable(self) -> bool:
+        """Quick TCP connect check to see if the heat pump is on the network."""
+        try:
+            _, writer = await asyncio.wait_for(
+                asyncio.open_connection(self.modbus.host, self.modbus.port),
+                timeout=2
+            )
+            writer.close()
+            await writer.wait_closed()
+            return True
+        except (ConnectionRefusedError, asyncio.TimeoutError, OSError):
+            return False
 
     def _queue_cmd(self, name):
         """Return a callback that queues a command for async processing."""
