@@ -186,14 +186,15 @@ def setup_logging(level: str = "INFO"):
 
 
 def main():
-    """Entry point when called from run.sh with config as JSON arg."""
+    """Entry point when called from run.sh with options file path."""
     import json
 
     if len(sys.argv) < 2:
-        print("Usage: main.py '<json config>'")
+        print("Usage: main.py /data/options.json")
         sys.exit(1)
 
-    config = json.loads(sys.argv[1])
+    with open(sys.argv[1]) as f:
+        config = json.load(f)
     setup_logging(config.get("loglevel", "INFO"))
 
     addon = FairlandX20Addon(config)
