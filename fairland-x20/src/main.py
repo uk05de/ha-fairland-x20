@@ -54,14 +54,29 @@ class FairlandX20Addon:
         self.mqtt.set_command_callback("fan_mode", self._queue_cmd("fan_mode"))
         self.mqtt.set_command_callback("target_temp", self._queue_cmd("target_temp"))
 
-        # Connect Modbus
-        await self.modbus.connect()
-
         # Main loop
         consecutive_errors = 0
         max_errors = 10
+        was_polling = False
 
         while self._running:
+            if not self.mqtt.polling_enabled:
+                # Polling disabled (Wintermodus)
+                if was_polling:
+                    log.info("Polling disabled - disconnecting Modbus, marking offline")
+                    await self.modbus.disconnect()
+                    self.mqtt.publish_offline()
+                    was_polling = False
+                await asyncio.sleep(self.scan_interval)
+                continue
+
+            # Polling enabled - connect if needed
+            if not was_polling:
+                log.info("Polling enabled - connecting to Modbus")
+                await self.modbus.connect()
+                consecutive_errors = 0
+                was_polling = True
+
             try:
                 # Process pending commands
                 await self._process_commands()

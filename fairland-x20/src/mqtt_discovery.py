@@ -38,6 +38,7 @@ class MqttBridge:
         self._client.on_message = self._on_message
         self._command_callbacks = {}
         self._discovery_sent = False
+        self.polling_enabled = True
 
     def connect(self):
         self._client.connect(self.host, self.port, keepalive=60)
@@ -57,9 +58,12 @@ class MqttBridge:
             log.info("MQTT broker connected")
             # Subscribe to command topics
             client.subscribe(f"{TOPIC_PREFIX}/switch/power/set")
+            client.subscribe(f"{TOPIC_PREFIX}/switch/polling/set")
             client.subscribe(f"{TOPIC_PREFIX}/climate/mode/set")
             client.subscribe(f"{TOPIC_PREFIX}/climate/fan/set")
             client.subscribe(f"{TOPIC_PREFIX}/climate/temp/set")
+            # Restore polling state from retained message
+            client.subscribe(f"{TOPIC_PREFIX}/switch/polling/state")
             self._discovery_sent = False
         else:
             log.error("MQTT connection failed with code %d", rc)
@@ -69,7 +73,16 @@ class MqttBridge:
         payload = msg.payload.decode("utf-8")
         log.debug("MQTT received: %s = %s", topic, payload)
 
-        if topic == f"{TOPIC_PREFIX}/switch/power/set":
+        if topic == f"{TOPIC_PREFIX}/switch/polling/set" or \
+           topic == f"{TOPIC_PREFIX}/switch/polling/state":
+            self.polling_enabled = payload.upper() == "ON"
+            log.info("Polling %s", "enabled" if self.polling_enabled else "disabled (Wintermodus)")
+            # Publish confirmed state (only on /set to avoid loop)
+            if topic.endswith("/set"):
+                self._publish(f"{TOPIC_PREFIX}/switch/polling/state",
+                              "ON" if self.polling_enabled else "OFF")
+
+        elif topic == f"{TOPIC_PREFIX}/switch/power/set":
             cb = self._command_callbacks.get("power")
             if cb:
                 cb(payload.upper() == "ON")
@@ -177,7 +190,17 @@ class MqttBridge:
             "state_class": "measurement",
         })
 
-        # --- Switch ---
+        # --- Switches ---
+        self._publish_discovery("switch", "polling", {
+            "name": "Abfrage aktiv",
+            "state_topic": f"{TOPIC_PREFIX}/switch/polling/state",
+            "command_topic": f"{TOPIC_PREFIX}/switch/polling/set",
+            "payload_on": "ON",
+            "payload_off": "OFF",
+            "icon": "mdi:snowflake-thermometer",
+            "entity_category": "config",
+        })
+
         self._publish_discovery("switch", "power", {
             "name": "Ein/Aus",
             "state_topic": f"{TOPIC_PREFIX}/switch/power/state",
@@ -207,6 +230,9 @@ class MqttBridge:
         })
 
         self._discovery_sent = True
+        # Publish initial polling state (if no retained message overrides it)
+        self._publish(f"{TOPIC_PREFIX}/switch/polling/state",
+                      "ON" if self.polling_enabled else "OFF")
         log.info("MQTT Discovery configs published")
 
     def _publish_discovery(self, component: str, object_id: str, config: dict):
@@ -268,6 +294,11 @@ class MqttBridge:
                       fan_map.get(state.fan_mode, "low"))
         self._publish(f"{TOPIC_PREFIX}/climate/temp/state",
                       str(state.target_temp))
+
+    def publish_offline(self):
+        """Mark device as offline (used when polling is disabled)."""
+        self.send_discovery()
+        self._client.publish(f"{TOPIC_PREFIX}/availability", "offline", retain=True)
 
     def _publish(self, topic: str, payload: str):
         self._client.publish(topic, payload, retain=True)
