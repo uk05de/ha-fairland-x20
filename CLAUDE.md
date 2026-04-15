@@ -8,7 +8,7 @@
 ## Architecture
 - Python addon using pymodbus (Modbus TCP) + paho-mqtt (MQTT Discovery)
 - No proxy layer — reads registers directly from heat pump
-- Publishes to local MQTT broker (192.168.2.158:1883) with MQTT Discovery
+- Publishes to local MQTT broker with MQTT Discovery
 - Config via /data/options.json (HA addon options)
 - Startup: run.sh -> main.py
 
@@ -49,6 +49,6 @@
 ## Important Notes
 - Heat pump is offline in winter — addon detects this and waits
 - User's network: 192.168.2.0/24
-- MQTT broker requires authentication (user: homeassistant)
+- MQTT broker requires authentication
 - Don't mask mqtt_password in logs was already handled in run.sh
 - Always bump version in config.yaml with every functional change
