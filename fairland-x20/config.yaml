@@ -13,12 +13,12 @@ init: false
 services:
   - mqtt:need
 options:
-  modbus_host: "192.168.2.100"
+  modbus_host: "192.168.1.1"
   modbus_port: 502
   modbus_slave: 1
   scan_interval: 30
   message_delay_ms: 200
-  mqtt_host: "192.168.2.158"
+  mqtt_host: "192.168.1.100"
   mqtt_port: 1883
   mqtt_user: ""
   mqtt_password: ""
