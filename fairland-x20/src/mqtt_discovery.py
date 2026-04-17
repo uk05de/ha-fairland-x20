@@ -28,9 +28,11 @@ class MqttBridge:
     """Bridges Fairland X20 state to Home Assistant via MQTT Discovery."""
 
     def __init__(self, host: str, port: int = 1883,
-                 username: str = "", password: str = ""):
+                 username: str = "", password: str = "",
+                 fallback_temp_topic: str = ""):
         self.host = host
         self.port = port
+        self.fallback_temp_topic = fallback_temp_topic.strip()
         self._client = mqtt.Client(client_id="fairland_x20", protocol=mqtt.MQTTv311)
         if username:
             self._client.username_pw_set(username, password)
@@ -39,6 +41,9 @@ class MqttBridge:
         self._command_callbacks = {}
         self._discovery_sent = False
         self.polling_enabled = True
+        self._fallback_temp = None
+        self._last_target_temp = None
+        self._show_target = False
 
     def connect(self):
         self._client.connect(self.host, self.port, keepalive=60)
@@ -64,6 +69,11 @@ class MqttBridge:
             client.subscribe(f"{TOPIC_PREFIX}/climate/temp/set")
             # Restore polling state from retained message
             client.subscribe(f"{TOPIC_PREFIX}/switch/polling/state")
+            # Subscribe to external fallback temperature source
+            if self.fallback_temp_topic:
+                client.subscribe(self.fallback_temp_topic)
+                log.info("Subscribed to fallback temperature topic: %s",
+                         self.fallback_temp_topic)
             self._discovery_sent = False
         else:
             log.error("MQTT connection failed with code %d", rc)
@@ -110,6 +120,15 @@ class MqttBridge:
                     cb(float(payload))
                 except ValueError:
                     log.warning("Invalid temperature value: %s", payload)
+
+        elif self.fallback_temp_topic and topic == self.fallback_temp_topic:
+            try:
+                self._fallback_temp = float(payload)
+                # If WP is off/unavailable, refresh display sensor immediately
+                if not self._show_target:
+                    self._publish_display_temp()
+            except ValueError:
+                log.warning("Invalid fallback temperature: %s", payload)
 
     def send_discovery(self):
         """Publish MQTT Discovery configs so HA auto-creates all entities."""
@@ -190,6 +209,21 @@ class MqttBridge:
             "state_class": "measurement",
         })
 
+        # Display sensor: target temp while WP runs, fallback water temp otherwise.
+        # Uses a separate availability topic so it stays visible when the WP is
+        # offline (winter / switched off) — that is precisely when the fallback
+        # value is needed.
+        self._publish_discovery("sensor", "target_temp_display", {
+            "name": "Zieltemperatur Anzeige",
+            "state_topic": f"{TOPIC_PREFIX}/sensor/target_temp_display/state",
+            "unit_of_measurement": "°C",
+            "device_class": "temperature",
+            "state_class": "measurement",
+            "availability_topic": f"{TOPIC_PREFIX}/addon_availability",
+            "payload_available": "online",
+            "payload_not_available": "offline",
+        })
+
         # --- Switches ---
         self._publish_discovery("switch", "polling", {
             "name": "Abfrage aktiv",
@@ -230,6 +264,9 @@ class MqttBridge:
         })
 
         self._discovery_sent = True
+        # Mark addon itself as online (separate from WP availability)
+        self._client.publish(f"{TOPIC_PREFIX}/addon_availability",
+                             "online", retain=True)
         # Publish initial polling state (if no retained message overrides it)
         self._publish(f"{TOPIC_PREFIX}/switch/polling/state",
                       "ON" if self.polling_enabled else "OFF")
@@ -239,9 +276,9 @@ class MqttBridge:
         """Publish a single MQTT Discovery config."""
         config["unique_id"] = f"fairland_x20_{object_id}"
         config["device"] = DEVICE_INFO
-        config["availability_topic"] = f"{TOPIC_PREFIX}/availability"
-        config["payload_available"] = "online"
-        config["payload_not_available"] = "offline"
+        config.setdefault("availability_topic", f"{TOPIC_PREFIX}/availability")
+        config.setdefault("payload_available", "online")
+        config.setdefault("payload_not_available", "offline")
 
         topic = f"{DISCOVERY_PREFIX}/{component}/fairland_x20/{object_id}/config"
         payload = json.dumps(config)
@@ -257,7 +294,13 @@ class MqttBridge:
         self._client.publish(f"{TOPIC_PREFIX}/availability", avail, retain=True)
 
         if not state.available:
+            self._show_target = False
+            self._publish_display_temp()
             return
+
+        self._last_target_temp = state.target_temp
+        self._show_target = state.running
+        self._publish_display_temp()
 
         # Binary sensors
         self._publish(f"{TOPIC_PREFIX}/binary_sensor/status/state",
@@ -299,6 +342,19 @@ class MqttBridge:
         """Mark device as offline (used when polling is disabled)."""
         self.send_discovery()
         self._client.publish(f"{TOPIC_PREFIX}/availability", "offline", retain=True)
+        self._show_target = False
+        self._publish_display_temp()
+
+    def _publish_display_temp(self):
+        """Publish the combined display value (target when running, else fallback)."""
+        if self._show_target and self._last_target_temp is not None:
+            value = self._last_target_temp
+        elif self._fallback_temp is not None:
+            value = self._fallback_temp
+        else:
+            return
+        self._publish(f"{TOPIC_PREFIX}/sensor/target_temp_display/state",
+                      str(value))
 
     def _publish(self, topic: str, payload: str):
         self._client.publish(topic, payload, retain=True)

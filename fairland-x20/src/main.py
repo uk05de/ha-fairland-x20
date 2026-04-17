@@ -34,6 +34,7 @@ class FairlandX20Addon:
             port=config["mqtt_port"],
             username=config.get("mqtt_user", ""),
             password=config.get("mqtt_password", ""),
+            fallback_temp_topic=config.get("fallback_temp_topic", ""),
         )
 
         self._running = True

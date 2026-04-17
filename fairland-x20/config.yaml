@@ -1,6 +1,6 @@
 name: "Fairland X20"
 description: "Fairland X20 Pool Heat Pump integration via Modbus TCP and MQTT Discovery"
-version: "0.6.0"
+version: "0.7.0"
 slug: "fairland_x20"
 arch:
   - aarch64
@@ -22,6 +22,7 @@ options:
   mqtt_port: 1883
   mqtt_user: ""
   mqtt_password: ""
+  fallback_temp_topic: "bayrol_cl_ph/sensor/temperature/state"
   loglevel: "INFO"
 schema:
   modbus_host: str
@@ -33,4 +34,5 @@ schema:
   mqtt_port: int
   mqtt_user: str
   mqtt_password: str
+  fallback_temp_topic: str?
   loglevel: list(INFO|DEBUG|ERROR)
