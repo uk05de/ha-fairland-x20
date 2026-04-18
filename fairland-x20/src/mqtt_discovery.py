@@ -46,11 +46,16 @@ class MqttBridge:
         self._show_target = False
 
     def connect(self):
+        # LWT: broker marks addon offline if the connection drops unexpectedly
+        self._client.will_set(f"{TOPIC_PREFIX}/addon_availability",
+                              "offline", retain=True)
         self._client.connect(self.host, self.port, keepalive=60)
         self._client.loop_start()
         log.info("MQTT connected to %s:%d", self.host, self.port)
 
     def disconnect(self):
+        self._client.publish(f"{TOPIC_PREFIX}/addon_availability",
+                             "offline", retain=True)
         self._client.loop_stop()
         self._client.disconnect()
         log.info("MQTT disconnected")
@@ -136,12 +141,17 @@ class MqttBridge:
             return
 
         # --- Binary Sensors ---
+        # Status stays available whenever the addon runs: OFF is published
+        # for WP off/unreachable, ON only when coil 0 reports running.
         self._publish_discovery("binary_sensor", "status", {
             "name": "Status",
             "device_class": "running",
             "state_topic": f"{TOPIC_PREFIX}/binary_sensor/status/state",
             "payload_on": "ON",
             "payload_off": "OFF",
+            "availability_topic": f"{TOPIC_PREFIX}/addon_availability",
+            "payload_available": "online",
+            "payload_not_available": "offline",
         })
 
         self._publish_discovery("binary_sensor", "error", {
@@ -296,6 +306,8 @@ class MqttBridge:
         if not state.available:
             self._show_target = False
             self._publish_display_temp()
+            # Status persists: WP unreachable → not running
+            self._publish(f"{TOPIC_PREFIX}/binary_sensor/status/state", "OFF")
             return
 
         self._last_target_temp = state.target_temp
@@ -344,6 +356,8 @@ class MqttBridge:
         self._client.publish(f"{TOPIC_PREFIX}/availability", "offline", retain=True)
         self._show_target = False
         self._publish_display_temp()
+        # Status persists: polling off / winter mode → not running
+        self._publish(f"{TOPIC_PREFIX}/binary_sensor/status/state", "OFF")
 
     def _publish_display_temp(self):
         """Publish the combined display value (target when running, else fallback)."""
