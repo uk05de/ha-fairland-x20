@@ -102,12 +102,11 @@ class MqttBridge:
 
         elif topic == f"{TOPIC_PREFIX}/switch/auto_heat/set" or \
              topic == f"{TOPIC_PREFIX}/switch/auto_heat/state":
+            # Heizautomatik is a passive user-intent flag — the addon
+            # publishes its state for other consumers (e.g. ha-pool-pump)
+            # to read; the addon itself doesn't act on it.
             new_state = payload.upper() == "ON"
             self.auto_heat_enabled = new_state
-            cb = self._command_callbacks.get("auto_heat")
-            if cb:
-                cb(new_state)
-            # Echo confirmed state back (only on /set to avoid loop)
             if topic.endswith("/set"):
                 self._publish(f"{TOPIC_PREFIX}/switch/auto_heat/state",
                               "ON" if new_state else "OFF")
@@ -269,7 +268,7 @@ class MqttBridge:
             "icon": "mdi:heat-pump",
         })
 
-        # Heizautomatik: couples WP to pool pump status.
+        # Heizautomatik: passive user-intent flag for the pool pump to read.
         # Stays available even when the WP is offline (winter mode).
         self._publish_discovery("switch", "auto_heat", {
             "name": "Heizautomatik",
@@ -278,26 +277,6 @@ class MqttBridge:
             "payload_on": "ON",
             "payload_off": "OFF",
             "icon": "mdi:auto-mode",
-            "availability_topic": f"{TOPIC_PREFIX}/addon_availability",
-            "payload_available": "online",
-            "payload_not_available": "offline",
-        })
-
-        self._publish_discovery("sensor", "auto_heat_status", {
-            "name": "Heizautomatik Status",
-            "state_topic": f"{TOPIC_PREFIX}/sensor/auto_heat_status/state",
-            "icon": "mdi:state-machine",
-            "availability_topic": f"{TOPIC_PREFIX}/addon_availability",
-            "payload_available": "online",
-            "payload_not_available": "offline",
-        })
-
-        self._publish_discovery("binary_sensor", "flow_ok", {
-            "name": "Durchfluss OK",
-            "state_topic": f"{TOPIC_PREFIX}/binary_sensor/flow_ok/state",
-            "payload_on": "ON",
-            "payload_off": "OFF",
-            "icon": "mdi:waves-arrow-right",
             "availability_topic": f"{TOPIC_PREFIX}/addon_availability",
             "payload_available": "online",
             "payload_not_available": "offline",
@@ -333,24 +312,10 @@ class MqttBridge:
                       "ON" if self.auto_heat_enabled else "OFF")
         log.info("MQTT Discovery configs published")
 
-    def publish_auto_heat_status(self, status_text: str):
-        self._publish(f"{TOPIC_PREFIX}/sensor/auto_heat_status/state", status_text)
-
-    def publish_flow_ok(self, flow_ok: bool):
-        self._publish(f"{TOPIC_PREFIX}/binary_sensor/flow_ok/state",
-                      "ON" if flow_ok else "OFF")
-
     def publish_power_state(self, running: bool):
         """Echo the actual power state — used when a command is rejected."""
         self._publish(f"{TOPIC_PREFIX}/switch/power/state",
                       "ON" if running else "OFF")
-
-    def set_auto_heat_state(self, enabled: bool):
-        """Externally toggle the auto-heat switch (e.g. when a manual OFF
-        on the power switch should also disable the automation)."""
-        self.auto_heat_enabled = enabled
-        self._publish(f"{TOPIC_PREFIX}/switch/auto_heat/state",
-                      "ON" if enabled else "OFF")
 
     def _publish_discovery(self, component: str, object_id: str, config: dict):
         """Publish a single MQTT Discovery config."""

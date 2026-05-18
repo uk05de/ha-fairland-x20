@@ -6,10 +6,8 @@
 import asyncio
 import logging
 import signal
-import socket
 import sys
 
-from auto_heat import AutoHeatController
 from fairland_x20 import FairlandX20Client
 from ha_api import HomeAssistantApi
 from mqtt_discovery import MqttBridge
@@ -18,10 +16,16 @@ log = logging.getLogger("fairland-x20")
 
 
 class FairlandX20Addon:
-    """Main addon loop: poll Modbus, publish to MQTT, handle commands."""
+    """Main addon loop: poll Modbus, publish to MQTT, handle commands.
+
+    Safety policy: power-on is only honored while the pool pump (as read
+    from HA via the Supervisor API) is on. If we ever observe the WP
+    running with the pool off, we shut the WP down.
+    """
 
     def __init__(self, config: dict):
         self.scan_interval = config["scan_interval"]
+        self.pool_status_entity = config.get("pool_status_entity", "")
 
         self.modbus = FairlandX20Client(
             host=config["modbus_host"],
@@ -40,12 +44,6 @@ class FairlandX20Addon:
         )
 
         self.ha_api = HomeAssistantApi()
-        self.auto_heat = AutoHeatController(
-            config=config,
-            ha_api=self.ha_api,
-            modbus_client=self.modbus,
-            mqtt_bridge=self.mqtt,
-        )
 
         self._running = True
         self._command_queue = asyncio.Queue()
@@ -58,10 +56,11 @@ class FairlandX20Addon:
                  self.modbus.host, self.modbus.port, self.modbus.slave)
         log.info("MQTT: %s:%d", self.mqtt.host, self.mqtt.port)
         log.info("Scan interval: %ds", self.scan_interval)
+        log.info("Pool status entity: %s",
+                 self.pool_status_entity or "(not configured — safety disabled)")
 
         # Connect MQTT and publish discovery immediately
         self.mqtt.connect()
-        # Wait briefly for MQTT connection to establish
         await asyncio.sleep(2)
         self.mqtt.publish_offline()
 
@@ -70,7 +69,6 @@ class FairlandX20Addon:
         self.mqtt.set_command_callback("hvac_mode", self._queue_cmd("hvac_mode"))
         self.mqtt.set_command_callback("fan_mode", self._queue_cmd("fan_mode"))
         self.mqtt.set_command_callback("target_temp", self._queue_cmd("target_temp"))
-        self.mqtt.set_command_callback("auto_heat", self.auto_heat.set_enabled)
 
         # Main loop
         consecutive_errors = 0
@@ -78,7 +76,6 @@ class FairlandX20Addon:
         was_active = False
 
         while self._running:
-            # Manual override: polling disabled via switch
             if not self.mqtt.polling_enabled:
                 if was_active:
                     log.info("Polling disabled - disconnecting Modbus, marking offline")
@@ -89,7 +86,6 @@ class FairlandX20Addon:
                 await asyncio.sleep(self.scan_interval)
                 continue
 
-            # Auto-detect: check if WP is reachable
             reachable = await self._check_reachable()
 
             if not reachable:
@@ -110,7 +106,6 @@ class FairlandX20Addon:
                          self.modbus.host, self.modbus.port)
             self._reachable = True
 
-            # Connect if needed
             if not was_active:
                 log.info("Connecting to Modbus")
                 await self.modbus.connect()
@@ -118,10 +113,8 @@ class FairlandX20Addon:
                 was_active = True
 
             try:
-                # Process pending commands
                 await self._process_commands()
 
-                # Poll state
                 state = await self.modbus.poll()
                 self.mqtt.publish_state(state)
 
@@ -135,12 +128,9 @@ class FairlandX20Addon:
                                   max_errors)
                         sys.exit(1)
 
-                # Heizautomatik decides + applies based on pool pump state
-                if state.available:
-                    try:
-                        await self.auto_heat.tick(wp_running=state.running)
-                    except Exception as e:
-                        log.error("Auto-heat tick error: %s", e)
+                # Safety: if WP is running but pool isn't, shut WP down.
+                if state.available and state.running:
+                    await self._enforce_pool_running_safety()
 
             except Exception as e:
                 log.error("Main loop error: %s", e)
@@ -165,6 +155,30 @@ class FairlandX20Addon:
         except (ConnectionRefusedError, asyncio.TimeoutError, OSError):
             return False
 
+    async def _pool_is_running(self) -> bool | None:
+        """True/False if we can read the pool status, None on read error.
+
+        Safety is conservative: a None result is treated like "not running"
+        by callers — better a false negative than running the WP dry.
+        """
+        if not self.pool_status_entity:
+            return None
+        state = await self.ha_api.get_state(self.pool_status_entity)
+        if state is None:
+            return None
+        return state.state.lower() == "on"
+
+    async def _enforce_pool_running_safety(self):
+        """Periodic check: if WP runs without the pool, shut WP down."""
+        pool_running = await self._pool_is_running()
+        if pool_running is False:
+            log.warning("Safety: WP läuft ohne Pool-Pumpe → AUS")
+            await self.modbus.set_power(False)
+        elif pool_running is None and self.pool_status_entity:
+            log.warning("Safety: Pool-Status nicht lesbar (%s) → WP AUS",
+                        self.pool_status_entity)
+            await self.modbus.set_power(False)
+
     def _queue_cmd(self, name):
         """Return a callback that queues a command for async processing."""
         def callback(value):
@@ -176,23 +190,17 @@ class FairlandX20Addon:
         while not self._command_queue.empty():
             cmd, value = self._command_queue.get_nowait()
 
-            if not self.auto_heat.is_command_allowed(cmd, value):
-                log.info("Command rejected by safety: %s = %s", cmd, value)
-                # Reflect the actual state back to MQTT so the UI doesn't
-                # show a stuck "ON" toggle the addon never honored.
-                if cmd == "power":
+            # Safety filter: power=ON only when the pool is actually running
+            if cmd == "power" and value is True and self.pool_status_entity:
+                pool_running = await self._pool_is_running()
+                if not pool_running:
+                    log.warning("Command rejected: power=ON aber Pool-Pumpe nicht aktiv")
                     self.mqtt.publish_power_state(self.modbus.state.running)
-                continue
+                    continue
 
             log.info("Processing command: %s = %s", cmd, value)
 
             if cmd == "power":
-                # Manual OFF must win — also disable Heizautomatik so the
-                # next tick doesn't switch the WP back on.
-                if value is False and self.auto_heat.enabled:
-                    log.info("Manueller Power=OFF → Heizautomatik aus")
-                    self.auto_heat.set_enabled(False)
-                    self.mqtt.set_auto_heat_state(False)
                 await self.modbus.set_power(value)
             elif cmd == "hvac_mode":
                 await self.modbus.set_hvac_mode(value)
