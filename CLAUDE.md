@@ -56,9 +56,9 @@ configurable prerun delay and a postrun where the WP shuts off before the
 pool pump's scheduled stop so the pump keeps flushing residual heat.
 
 ### Reads (via HA Supervisor REST API, requires `homeassistant_api: true`)
-- `sensor.pool_pump_status` — "running (X%)" / "stopped"
-- `sensor.pool_pump_mode` — "Automatik" / "Manuell" / "Frostschutz" / program name
-- `sensor.pool_pump_next_transition` — ISO timestamp of next state change
+- `binary_sensor.pool_pumpe_status` — "on" / "off" (device_class=RUNNING)
+- `sensor.pool_pumpe_mode` — "Automatik" / "Manuell" / "Frostschutz" / program name
+- `sensor.pool_pumpe_nachster_wechsel` — ISO timestamp of next state change
 
 ### MQTT entities exposed
 - `switch.fairland_x20_heizautomatik` — master switch, retained

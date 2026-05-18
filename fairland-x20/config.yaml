@@ -1,6 +1,6 @@
 name: "Fairland X20"
 description: "Fairland X20 Pool Heat Pump integration via Modbus TCP and MQTT Discovery"
-version: "0.9.1"
+version: "0.9.2"
 slug: "fairland_x20"
 arch:
   - aarch64
@@ -24,7 +24,7 @@ options:
   mqtt_user: ""
   mqtt_password: ""
   fallback_temp_topic: "bayrol_cl_ph/sensor/temperature/state"
-  pool_status_entity: "sensor.pool_pumpe_status"
+  pool_status_entity: "binary_sensor.pool_pumpe_status"
   pool_mode_entity: "sensor.pool_pumpe_mode"
   pool_next_transition_entity: "sensor.pool_pumpe_nachster_wechsel"
   pool_allowed_modes:

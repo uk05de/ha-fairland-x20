@@ -149,7 +149,8 @@ class AutoHeatController:
                 or status.age_seconds > STATE_STALE_AFTER_S):
             return False, None, False
 
-        pool_running = status.state.lower().startswith("running")
+        # binary_sensor uses HA convention "on" / "off"
+        pool_running = status.state.lower() == "on"
 
         if mode is None or mode.age_seconds > STATE_STALE_AFTER_S:
             return pool_running, None, False
