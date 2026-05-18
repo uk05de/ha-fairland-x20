@@ -23,6 +23,19 @@ DEVICE_INFO = {
 TOPIC_PREFIX = "fairland_x20"
 DISCOVERY_PREFIX = "homeassistant"
 
+# Entities that earlier addon versions exposed but no longer do.
+# On startup we publish empty retained payloads to these topics so HA
+# forgets them. Safe to keep this list across versions — empty publishes
+# to non-existent topics are no-ops.
+REMOVED_ENTITIES = [
+    ("sensor", "auto_heat_status"),
+    ("binary_sensor", "flow_ok"),
+]
+REMOVED_STATE_TOPICS = [
+    f"{TOPIC_PREFIX}/sensor/auto_heat_status/state",
+    f"{TOPIC_PREFIX}/binary_sensor/flow_ok/state",
+]
+
 
 class MqttBridge:
     """Bridges Fairland X20 state to Home Assistant via MQTT Discovery."""
@@ -153,6 +166,8 @@ class MqttBridge:
         """Publish MQTT Discovery configs so HA auto-creates all entities."""
         if self._discovery_sent:
             return
+
+        self._cleanup_removed_entities()
 
         # --- Binary Sensors ---
         # Status stays available whenever the addon runs: OFF is published
@@ -316,6 +331,16 @@ class MqttBridge:
         """Echo the actual power state — used when a command is rejected."""
         self._publish(f"{TOPIC_PREFIX}/switch/power/state",
                       "ON" if running else "OFF")
+
+    def _cleanup_removed_entities(self):
+        """Tell HA to forget entities previous addon versions exposed."""
+        for component, object_id in REMOVED_ENTITIES:
+            topic = f"{DISCOVERY_PREFIX}/{component}/fairland_x20/{object_id}/config"
+            self._client.publish(topic, "", qos=1, retain=True)
+        for topic in REMOVED_STATE_TOPICS:
+            self._client.publish(topic, "", qos=1, retain=True)
+        log.info("Cleaned up %d removed entities from MQTT broker",
+                 len(REMOVED_ENTITIES))
 
     def _publish_discovery(self, component: str, object_id: str, config: dict):
         """Publish a single MQTT Discovery config."""
