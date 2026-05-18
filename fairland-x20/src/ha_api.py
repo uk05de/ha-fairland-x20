@@ -75,9 +75,13 @@ class HomeAssistantApi:
 
             state = data.get("state")
             if state in (None, "", "unknown", "unavailable"):
+                log.debug("HA API %s state=%r — treated as unavailable",
+                          entity_id, state)
                 return None
 
             age = _parse_age_seconds(data.get("last_updated", ""))
+            log.debug("HA API %s = %r (last_updated %.0fs ago)",
+                      entity_id, state, age)
             return HaState(state=state, age_seconds=age, fetched_at=time.monotonic())
 
         except (aiohttp.ClientError, asyncio.TimeoutError) as e:

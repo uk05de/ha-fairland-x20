@@ -19,9 +19,6 @@ from fairland_x20 import HvacMode
 
 log = logging.getLogger("fairland-x20.auto_heat")
 
-# Pool status sensor age threshold — beyond this we treat the value as unknown
-STATE_STALE_AFTER_S = 60.0
-
 _HVAC_TARGETS = {
     "heat": HvacMode.HEAT,
     "auto": HvacMode.AUTO,
@@ -77,6 +74,13 @@ class AutoHeatController:
         """Run one decision cycle. Called from the main poll loop."""
         pool_running, mode_str, mode_allowed = await self._read_pool_state()
         seconds_until_stop = await self._read_seconds_until_stop()
+
+        log.debug(
+            "Tick: enabled=%s pool_running=%s mode=%r allowed=%s "
+            "sec_until_stop=%s wp_running=%s",
+            self.enabled, pool_running, mode_str, mode_allowed,
+            seconds_until_stop, wp_running,
+        )
 
         # Update prerun timer
         if pool_running:
@@ -141,18 +145,21 @@ class AutoHeatController:
         return True, "läuft"
 
     async def _read_pool_state(self):
-        """Return (pool_running, mode_str, mode_allowed)."""
+        """Return (pool_running, mode_str, mode_allowed).
+
+        ha_api.get_state already returns None for unknown/unavailable/missing,
+        so any non-None state we get back is the current truth.
+        """
         status = await self.ha_api.get_state(self.pool_status_entity)
         mode = await self.ha_api.get_state(self.pool_mode_entity)
 
-        if (status is None
-                or status.age_seconds > STATE_STALE_AFTER_S):
+        if status is None:
             return False, None, False
 
         # binary_sensor uses HA convention "on" / "off"
         pool_running = status.state.lower() == "on"
 
-        if mode is None or mode.age_seconds > STATE_STALE_AFTER_S:
+        if mode is None:
             return pool_running, None, False
 
         mode_allowed = mode.state in self.allowed_modes
