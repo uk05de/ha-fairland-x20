@@ -187,6 +187,12 @@ class FairlandX20Addon:
             log.info("Processing command: %s = %s", cmd, value)
 
             if cmd == "power":
+                # Manual OFF must win — also disable Heizautomatik so the
+                # next tick doesn't switch the WP back on.
+                if value is False and self.auto_heat.enabled:
+                    log.info("Manueller Power=OFF → Heizautomatik aus")
+                    self.auto_heat.set_enabled(False)
+                    self.mqtt.set_auto_heat_state(False)
                 await self.modbus.set_power(value)
             elif cmd == "hvac_mode":
                 await self.modbus.set_hvac_mode(value)

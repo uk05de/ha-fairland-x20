@@ -345,6 +345,13 @@ class MqttBridge:
         self._publish(f"{TOPIC_PREFIX}/switch/power/state",
                       "ON" if running else "OFF")
 
+    def set_auto_heat_state(self, enabled: bool):
+        """Externally toggle the auto-heat switch (e.g. when a manual OFF
+        on the power switch should also disable the automation)."""
+        self.auto_heat_enabled = enabled
+        self._publish(f"{TOPIC_PREFIX}/switch/auto_heat/state",
+                      "ON" if enabled else "OFF")
+
     def _publish_discovery(self, component: str, object_id: str, config: dict):
         """Publish a single MQTT Discovery config."""
         config["unique_id"] = f"fairland_x20_{object_id}"
