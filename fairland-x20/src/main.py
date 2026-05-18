@@ -9,7 +9,9 @@ import signal
 import socket
 import sys
 
+from auto_heat import AutoHeatController
 from fairland_x20 import FairlandX20Client
+from ha_api import HomeAssistantApi
 from mqtt_discovery import MqttBridge
 
 log = logging.getLogger("fairland-x20")
@@ -37,6 +39,14 @@ class FairlandX20Addon:
             fallback_temp_topic=config.get("fallback_temp_topic", ""),
         )
 
+        self.ha_api = HomeAssistantApi()
+        self.auto_heat = AutoHeatController(
+            config=config,
+            ha_api=self.ha_api,
+            modbus_client=self.modbus,
+            mqtt_bridge=self.mqtt,
+        )
+
         self._running = True
         self._command_queue = asyncio.Queue()
         self._reachable = False
@@ -60,6 +70,7 @@ class FairlandX20Addon:
         self.mqtt.set_command_callback("hvac_mode", self._queue_cmd("hvac_mode"))
         self.mqtt.set_command_callback("fan_mode", self._queue_cmd("fan_mode"))
         self.mqtt.set_command_callback("target_temp", self._queue_cmd("target_temp"))
+        self.mqtt.set_command_callback("auto_heat", self.auto_heat.set_enabled)
 
         # Main loop
         consecutive_errors = 0
@@ -124,6 +135,13 @@ class FairlandX20Addon:
                                   max_errors)
                         sys.exit(1)
 
+                # Heizautomatik decides + applies based on pool pump state
+                if state.available:
+                    try:
+                        await self.auto_heat.tick(wp_running=state.running)
+                    except Exception as e:
+                        log.error("Auto-heat tick error: %s", e)
+
             except Exception as e:
                 log.error("Main loop error: %s", e)
                 consecutive_errors += 1
@@ -157,6 +175,15 @@ class FairlandX20Addon:
         """Process all queued commands from MQTT."""
         while not self._command_queue.empty():
             cmd, value = self._command_queue.get_nowait()
+
+            if not self.auto_heat.is_command_allowed(cmd, value):
+                log.info("Command rejected by safety: %s = %s", cmd, value)
+                # Reflect the actual state back to MQTT so the UI doesn't
+                # show a stuck "ON" toggle the addon never honored.
+                if cmd == "power":
+                    self.mqtt.publish_power_state(self.modbus.state.running)
+                continue
+
             log.info("Processing command: %s = %s", cmd, value)
 
             if cmd == "power":
@@ -178,6 +205,7 @@ class FairlandX20Addon:
     async def stop(self):
         log.info("Stopping Fairland X20 Addon")
         self._running = False
+        await self.ha_api.close()
         await self.modbus.disconnect()
         self.mqtt.disconnect()
 

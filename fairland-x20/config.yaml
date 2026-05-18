@@ -1,6 +1,6 @@
 name: "Fairland X20"
 description: "Fairland X20 Pool Heat Pump integration via Modbus TCP and MQTT Discovery"
-version: "0.8.0"
+version: "0.9.0"
 slug: "fairland_x20"
 arch:
   - aarch64
@@ -10,6 +10,7 @@ arch:
 url: "https://github.com/uk05de/ha-fairland-x20"
 startup: services
 init: false
+homeassistant_api: true
 services:
   - mqtt:need
 options:
@@ -23,6 +24,14 @@ options:
   mqtt_user: ""
   mqtt_password: ""
   fallback_temp_topic: "bayrol_cl_ph/sensor/temperature/state"
+  pool_status_entity: "sensor.pool_pump_status"
+  pool_mode_entity: "sensor.pool_pump_mode"
+  pool_next_transition_entity: "sensor.pool_pump_next_transition"
+  pool_allowed_modes:
+    - "Automatik"
+  auto_heat_prerun_seconds: 60
+  auto_heat_postrun_seconds: 180
+  auto_heat_hvac_mode: "heat"
   loglevel: "INFO"
 schema:
   modbus_host: str
@@ -35,4 +44,12 @@ schema:
   mqtt_user: str
   mqtt_password: str
   fallback_temp_topic: str?
+  pool_status_entity: str?
+  pool_mode_entity: str?
+  pool_next_transition_entity: str?
+  pool_allowed_modes:
+    - str
+  auto_heat_prerun_seconds: int
+  auto_heat_postrun_seconds: int
+  auto_heat_hvac_mode: list(heat|auto)
   loglevel: list(INFO|DEBUG|ERROR)

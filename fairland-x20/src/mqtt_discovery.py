@@ -41,6 +41,7 @@ class MqttBridge:
         self._command_callbacks = {}
         self._discovery_sent = False
         self.polling_enabled = True
+        self.auto_heat_enabled = False
         self._fallback_temp = None
         self._last_target_temp = None
         self._show_target = False
@@ -69,11 +70,13 @@ class MqttBridge:
             # Subscribe to command topics
             client.subscribe(f"{TOPIC_PREFIX}/switch/power/set")
             client.subscribe(f"{TOPIC_PREFIX}/switch/polling/set")
+            client.subscribe(f"{TOPIC_PREFIX}/switch/auto_heat/set")
             client.subscribe(f"{TOPIC_PREFIX}/climate/mode/set")
             client.subscribe(f"{TOPIC_PREFIX}/climate/fan/set")
             client.subscribe(f"{TOPIC_PREFIX}/climate/temp/set")
-            # Restore polling state from retained message
+            # Restore retained switch state on (re)connect
             client.subscribe(f"{TOPIC_PREFIX}/switch/polling/state")
+            client.subscribe(f"{TOPIC_PREFIX}/switch/auto_heat/state")
             # Subscribe to external fallback temperature source
             if self.fallback_temp_topic:
                 client.subscribe(self.fallback_temp_topic)
@@ -96,6 +99,18 @@ class MqttBridge:
             if topic.endswith("/set"):
                 self._publish(f"{TOPIC_PREFIX}/switch/polling/state",
                               "ON" if self.polling_enabled else "OFF")
+
+        elif topic == f"{TOPIC_PREFIX}/switch/auto_heat/set" or \
+             topic == f"{TOPIC_PREFIX}/switch/auto_heat/state":
+            new_state = payload.upper() == "ON"
+            self.auto_heat_enabled = new_state
+            cb = self._command_callbacks.get("auto_heat")
+            if cb:
+                cb(new_state)
+            # Echo confirmed state back (only on /set to avoid loop)
+            if topic.endswith("/set"):
+                self._publish(f"{TOPIC_PREFIX}/switch/auto_heat/state",
+                              "ON" if new_state else "OFF")
 
         elif topic == f"{TOPIC_PREFIX}/switch/power/set":
             cb = self._command_callbacks.get("power")
@@ -254,6 +269,40 @@ class MqttBridge:
             "icon": "mdi:heat-pump",
         })
 
+        # Heizautomatik: couples WP to pool pump status.
+        # Stays available even when the WP is offline (winter mode).
+        self._publish_discovery("switch", "auto_heat", {
+            "name": "Heizautomatik",
+            "state_topic": f"{TOPIC_PREFIX}/switch/auto_heat/state",
+            "command_topic": f"{TOPIC_PREFIX}/switch/auto_heat/set",
+            "payload_on": "ON",
+            "payload_off": "OFF",
+            "icon": "mdi:auto-mode",
+            "availability_topic": f"{TOPIC_PREFIX}/addon_availability",
+            "payload_available": "online",
+            "payload_not_available": "offline",
+        })
+
+        self._publish_discovery("sensor", "auto_heat_status", {
+            "name": "Heizautomatik Status",
+            "state_topic": f"{TOPIC_PREFIX}/sensor/auto_heat_status/state",
+            "icon": "mdi:state-machine",
+            "availability_topic": f"{TOPIC_PREFIX}/addon_availability",
+            "payload_available": "online",
+            "payload_not_available": "offline",
+        })
+
+        self._publish_discovery("binary_sensor", "flow_ok", {
+            "name": "Durchfluss OK",
+            "state_topic": f"{TOPIC_PREFIX}/binary_sensor/flow_ok/state",
+            "payload_on": "ON",
+            "payload_off": "OFF",
+            "icon": "mdi:waves-arrow-right",
+            "availability_topic": f"{TOPIC_PREFIX}/addon_availability",
+            "payload_available": "online",
+            "payload_not_available": "offline",
+        })
+
         # --- Climate ---
         self._publish_discovery("climate", "climate", {
             "name": "Modus",
@@ -277,10 +326,24 @@ class MqttBridge:
         # Mark addon itself as online (separate from WP availability)
         self._client.publish(f"{TOPIC_PREFIX}/addon_availability",
                              "online", retain=True)
-        # Publish initial polling state (if no retained message overrides it)
+        # Publish initial switch states (if no retained message overrides them)
         self._publish(f"{TOPIC_PREFIX}/switch/polling/state",
                       "ON" if self.polling_enabled else "OFF")
+        self._publish(f"{TOPIC_PREFIX}/switch/auto_heat/state",
+                      "ON" if self.auto_heat_enabled else "OFF")
         log.info("MQTT Discovery configs published")
+
+    def publish_auto_heat_status(self, status_text: str):
+        self._publish(f"{TOPIC_PREFIX}/sensor/auto_heat_status/state", status_text)
+
+    def publish_flow_ok(self, flow_ok: bool):
+        self._publish(f"{TOPIC_PREFIX}/binary_sensor/flow_ok/state",
+                      "ON" if flow_ok else "OFF")
+
+    def publish_power_state(self, running: bool):
+        """Echo the actual power state — used when a command is rejected."""
+        self._publish(f"{TOPIC_PREFIX}/switch/power/state",
+                      "ON" if running else "OFF")
 
     def _publish_discovery(self, component: str, object_id: str, config: dict):
         """Publish a single MQTT Discovery config."""
