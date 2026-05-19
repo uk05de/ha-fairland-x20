@@ -47,6 +47,7 @@ class FairlandX20Addon:
 
         self._running = True
         self._command_queue = asyncio.Queue()
+        self._command_event = asyncio.Event()  # wakes main loop on new command
         self._reachable = False
         self._reachability_interval = 60  # check every 60s when offline
 
@@ -140,7 +141,14 @@ class FairlandX20Addon:
                               max_errors)
                     sys.exit(1)
 
-            await asyncio.sleep(self.scan_interval)
+            # Wait scan_interval OR wake immediately on new MQTT command.
+            # Polls stay periodic, writes propagate to Modbus without delay.
+            try:
+                await asyncio.wait_for(self._command_event.wait(),
+                                       timeout=self.scan_interval)
+            except asyncio.TimeoutError:
+                pass
+            self._command_event.clear()
 
     async def _check_reachable(self) -> bool:
         """Quick TCP connect check to see if the heat pump is on the network."""
@@ -180,9 +188,10 @@ class FairlandX20Addon:
             await self.modbus.set_power(False)
 
     def _queue_cmd(self, name):
-        """Return a callback that queues a command for async processing."""
+        """Return a callback that queues a command and wakes the main loop."""
         def callback(value):
             self._command_queue.put_nowait((name, value))
+            self._command_event.set()
         return callback
 
     async def _process_commands(self):

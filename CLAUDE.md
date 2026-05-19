@@ -46,19 +46,16 @@
 - Polling switch state retained via MQTT (survives restarts)
 - Auto-exit after 10 consecutive errors for watchdog restart
 - Climate entity with HVAC mode, fan mode, target temperature control
-- Heizautomatik switch: passive user-intent flag (see below)
 - Pool-running safety: power-on is gated on the pool pump being on
 
 ## Heizautomatik & Pool Coupling
 
-The WP-addon does *not* drive the coupling itself. Instead:
+The WP-addon is the slave; all coupling logic lives in `ha-pool-pump`:
 
-- **`switch.fairland_x20_heizautomatik`** is a passive retained MQTT flag.
-  ha-pool-pump reads it to decide whether to switch the WP on/off when
-  starting/stopping a pool program. The addon doesn't act on this switch.
-- ha-pool-pump is the master: it powers the WP on when starting an allowed
-  program, and powers the WP off (then waits for residual-flow delay
-  before stopping itself) when ending a program.
+- The Heizautomatik user-intent switch lives in `ha-pool-pump`, not here.
+- ha-pool-pump is the master: it powers the WP on (`switch.fairland_x20_ein_aus`)
+  when starting an allowed program, and powers the WP off + waits for
+  its residual-flow delay before stopping itself.
 - Prerun is handled by the WP hardware (soft-start with internal flow
   check). Postrun is handled by ha-pool-pump (keeps running after WP-off).
 

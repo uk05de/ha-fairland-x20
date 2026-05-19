@@ -30,10 +30,12 @@ DISCOVERY_PREFIX = "homeassistant"
 REMOVED_ENTITIES = [
     ("sensor", "auto_heat_status"),
     ("binary_sensor", "flow_ok"),
+    ("switch", "auto_heat"),
 ]
 REMOVED_STATE_TOPICS = [
     f"{TOPIC_PREFIX}/sensor/auto_heat_status/state",
     f"{TOPIC_PREFIX}/binary_sensor/flow_ok/state",
+    f"{TOPIC_PREFIX}/switch/auto_heat/state",
 ]
 
 
@@ -54,7 +56,6 @@ class MqttBridge:
         self._command_callbacks = {}
         self._discovery_sent = False
         self.polling_enabled = True
-        self.auto_heat_enabled = False
         self._fallback_temp = None
         self._last_target_temp = None
         self._show_target = False
@@ -83,13 +84,11 @@ class MqttBridge:
             # Subscribe to command topics
             client.subscribe(f"{TOPIC_PREFIX}/switch/power/set")
             client.subscribe(f"{TOPIC_PREFIX}/switch/polling/set")
-            client.subscribe(f"{TOPIC_PREFIX}/switch/auto_heat/set")
             client.subscribe(f"{TOPIC_PREFIX}/climate/mode/set")
             client.subscribe(f"{TOPIC_PREFIX}/climate/fan/set")
             client.subscribe(f"{TOPIC_PREFIX}/climate/temp/set")
             # Restore retained switch state on (re)connect
             client.subscribe(f"{TOPIC_PREFIX}/switch/polling/state")
-            client.subscribe(f"{TOPIC_PREFIX}/switch/auto_heat/state")
             # Subscribe to external fallback temperature source
             if self.fallback_temp_topic:
                 client.subscribe(self.fallback_temp_topic)
@@ -112,17 +111,6 @@ class MqttBridge:
             if topic.endswith("/set"):
                 self._publish(f"{TOPIC_PREFIX}/switch/polling/state",
                               "ON" if self.polling_enabled else "OFF")
-
-        elif topic == f"{TOPIC_PREFIX}/switch/auto_heat/set" or \
-             topic == f"{TOPIC_PREFIX}/switch/auto_heat/state":
-            # Heizautomatik is a passive user-intent flag — the addon
-            # publishes its state for other consumers (e.g. ha-pool-pump)
-            # to read; the addon itself doesn't act on it.
-            new_state = payload.upper() == "ON"
-            self.auto_heat_enabled = new_state
-            if topic.endswith("/set"):
-                self._publish(f"{TOPIC_PREFIX}/switch/auto_heat/state",
-                              "ON" if new_state else "OFF")
 
         elif topic == f"{TOPIC_PREFIX}/switch/power/set":
             cb = self._command_callbacks.get("power")
@@ -283,20 +271,6 @@ class MqttBridge:
             "icon": "mdi:heat-pump",
         })
 
-        # Heizautomatik: passive user-intent flag for the pool pump to read.
-        # Stays available even when the WP is offline (winter mode).
-        self._publish_discovery("switch", "auto_heat", {
-            "name": "Heizautomatik",
-            "state_topic": f"{TOPIC_PREFIX}/switch/auto_heat/state",
-            "command_topic": f"{TOPIC_PREFIX}/switch/auto_heat/set",
-            "payload_on": "ON",
-            "payload_off": "OFF",
-            "icon": "mdi:auto-mode",
-            "availability_topic": f"{TOPIC_PREFIX}/addon_availability",
-            "payload_available": "online",
-            "payload_not_available": "offline",
-        })
-
         # --- Climate ---
         self._publish_discovery("climate", "climate", {
             "name": "Modus",
@@ -323,8 +297,6 @@ class MqttBridge:
         # Publish initial switch states (if no retained message overrides them)
         self._publish(f"{TOPIC_PREFIX}/switch/polling/state",
                       "ON" if self.polling_enabled else "OFF")
-        self._publish(f"{TOPIC_PREFIX}/switch/auto_heat/state",
-                      "ON" if self.auto_heat_enabled else "OFF")
         log.info("MQTT Discovery configs published")
 
     def publish_power_state(self, running: bool):
